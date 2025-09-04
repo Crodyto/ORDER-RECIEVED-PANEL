@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Crodyto-Orders Reciever</title>
+  <style>
+    :root{--bg:#f8fafc;--card:#fff;--muted:#6b7280}
+    body{font-family:Inter,ui-sans-serif,system-ui,Segoe UI,Roboto,"Helvetica Neue",Arial;margin:0;background:var(--bg);color:#111}
+    .wrap{max-width:1100px;margin:28px auto;padding:18px}
+    header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    h1{margin:0;font-size:18px}
+    .card{background:var(--card);border:1px solid #e6edf3;padding:14px;border-radius:10px;box-shadow:0 2px 6px rgba(12,14,18,0.03)}
+    .row{display:flex;gap:8px;align-items:center}
+    input,select,button{padding:8px 10px;border-radius:8px;border:1px solid #d1d5db;font-size:14px}
+    table{width:100%;border-collapse:collapse;margin-top:12px}
+    th,td{padding:10px;border-bottom:1px solid #eef2f6;text-align:left;font-size:14px}
+    th{font-size:12px;color:var(--muted);text-transform:uppercase}
+    .muted{color:var(--muted)}
+    .badge{display:inline-block;padding:6px 8px;border-radius:999px;font-size:12px;border:1px solid #e8eef6}
+    .actions{display:flex;gap:8px}
+    .small{font-size:13px;padding:6px 8px}
+    .center{text-align:center}
+    .note{font-size:13px;color:var(--muted);margin-top:8px}
+    .signin-area{max-width:420px;margin:36px auto}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Crodyto— Orders Reciever</h1>
+      <div id="userArea" class="muted">Not signed in</div>
+    </header>
+
+    <div id="authCard" class="card signin-area">
+      <h3>Sign in</h3>
+      <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px">
+        <input id="email" placeholder="email" />
+        <input id="password" placeholder="password" type="password" />
+        <div class="row">
+          <button id="signInBtn">Sign in</button>
+          <button id="createUserBtn" class="small">Create user</button>
+        </div>
+        <div id="authMsg" class="note"></div>
+      </div>
+      <p class="note">Enable Email/Password auth in Firebase Console → Authentication.</p>
+    </div>
+
+    <div id="mainUI" style="display:none">
+      <div class="card">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between">
+          <div style="display:flex;gap:8px;align-items:center">
+            <input id="search" placeholder="Search by name / phone / address / id" style="min-width:280px" />
+            <select id="statusFilter">
+              <option value="">All status</option>
+              <option value="pending">Placed</option>
+              <option value="confirmed">Confirmed</option>
+              <option value="Shipped">Shipped</option>
+              <option value="out_for_delivery">Out for delivery</option>
+              <option value="delivered">Delivered</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+            <button id="refreshBtn" class="small">Refresh</button>
+            <button id="exportBtn" class="small">Export CSV</button>
+          </div>
+          <div class="actions">
+            <div id="signedInEmail" class="muted"></div>
+            <button id="signOutBtn" class="small">Sign out</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="ordersWrap" class="card" style="margin-top:12px">
+        <table>
+          <thead>
+            <tr>
+              <th>Order</th>
+              <th>Customer</th>
+              <th>Address</th>
+              <th>Total</th>
+              <th>Status</th>
+              <th>Created</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="ordersBody">
+            <tr><td colspan="7" class="center muted">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p class="note">Tip: If your app writes different field names, edit COLLECTION_NAME or adjust the display mapping in the JS below.</p>
+    </div>
+
+    <p class="note">Made for quick local use. Save this file as <code>admin.html</code> and open in a browser. For localhost usage with modules, use a local server (e.g., <code>npx http-server</code> or VSCode Live Server).</p>
+  </div>
+
+  <!-- Firebase modular SDK (v9+) -->
+  <script type="module">
+    // ---------- FIREBASE CONFIG (from you) ----------
+    const firebaseConfig = {
+      apiKey: "AIzaSyC5MGkOf5_0cF-xQrcA1PBSSvq6Y-AarSc",
+      authDomain: "ds-mart-888d2.firebaseapp.com",
+      projectId: "ds-mart-888d2",
+      storageBucket: "ds-mart-888d2.firebasestorage.app",
+      messagingSenderId: "108308848034",
+      appId: "1:108308848034:web:a8b3fe5e8784a4771e66fb",
+      measurementId: "G-KY618BJER7"
+    };
+
+    // Import modular SDK from gstatic
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.22.2/firebase-app.js';
+    import {
+      getAuth,
+      onAuthStateChanged,
+      signInWithEmailAndPassword,
+      createUserWithEmailAndPassword,
+      signOut
+    } from 'https://www.gstatic.com/firebasejs/9.22.2/firebase-auth.js';
+    import {
+      getFirestore,
+      collection,
+      query,
+      orderBy,
+      onSnapshot,
+      where,
+      updateDoc,
+      doc,
+      getDocs,
+      serverTimestamp
+    } from 'https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore.js';
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const COLLECTION_NAME = 'orders';
+
+    // UI refs
+    const authCard = document.getElementById('authCard');
+    const mainUI = document.getElementById('mainUI');
+    const emailEl = document.getElementById('email');
+    const passEl = document.getElementById('password');
+    const signInBtn = document.getElementById('signInBtn');
+    const createUserBtn = document.getElementById('createUserBtn');
+    const authMsg = document.getElementById('authMsg');
+    const userArea = document.getElementById('userArea');
+    const ordersBody = document.getElementById('ordersBody');
+    const searchEl = document.getElementById('search');
+    const statusFilterEl = document.getElementById('statusFilter');
+    const refreshBtn = document.getElementById('refreshBtn');
+    const exportBtn = document.getElementById('exportBtn');
+    const signOutBtn = document.getElementById('signOutBtn');
+    const signedInEmail = document.getElementById('signedInEmail');
+
+    let unsubscribe = null;
+    let orders = [];
+
+    function showAuth(msg=''){
+      authCard.style.display='block';
+      mainUI.style.display='none';
+      authMsg.textContent=msg;
+      userArea.textContent='Not signed in';
+    }
+
+    function showMain(){
+      authCard.style.display='none';
+      mainUI.style.display='block';
+    }
+
+    function toCSV(rows){
+      if(!rows.length) return '';
+      const headers = Object.keys(rows[0]);
+      const escape = v=>`"${String(v ?? '').replace(/\"/g,'\"\"')}"`;
+      const lines = [headers.map(escape).join(',')];
+      for(const r of rows) lines.push(headers.map(h=>escape(r[h])).join(','));
+      return lines.join('\n');
+    }
+
+    function download(filename, text){
+      const blob = new Blob([text], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href=url; a.download=filename; a.click(); URL.revokeObjectURL(url);
+    }
+
+    // Render table
+    function render(){
+      const q = searchEl.value.trim().toLowerCase();
+      const sf = statusFilterEl.value;
+      const filtered = orders.filter(o => {
+        if(sf && o.status !== sf) return false;
+        if(!q) return true;
+        const hay = [o.id, o.customerName, o.customerPhone, o.address].join(' ').toLowerCase();
+        return hay.includes(q);
+      });
+
+      if(!filtered.length){
+        ordersBody.innerHTML = '<tr><td colspan="7" class="center muted">No orders found.</td></tr>';
+        return;
+      }
+
+      ordersBody.innerHTML = filtered.map(o=>{
+        const itemsStr = Array.isArray(o.items) ? o.items.slice(0,3).map(it=>`${it.name||'Item'}×${it.qty||1}`).join(', ')+ (o.items.length>3?` +${o.items.length-3} more`:'') : '';
+        const created = o.createdAt && o.createdAt.seconds ? new Date(o.createdAt.seconds*1000).toLocaleString() : (o.createdAt? new Date(o.createdAt).toLocaleString() : '—');
+        return `
+          <tr>
+            <td><div>#${o.id}</div><div class="muted" style="font-size:12px">${itemsStr}</div></td>
+            <td><div>${o.customerName||'—'}</div><div class="muted">${o.customerPhone||'—'}</div></td>
+            <td class="muted">${o.address||'—'}</td>
+            <td>₹${Number(o.total||0).toFixed(2)}</td>
+            <td><span class="badge">${o.status||'—'}</span></td>
+            <td class="muted">${created}</td>
+            <td>
+              <select data-id="${o.id}">
+                <option value="pending">Pending</option>
+                <option value="confirmed">Confirmed</option>
+                <option value="shipped">Shipped</option>
+                <option value="out_for_delivery">Out for delivery</option>
+                <option value="delivered">Delivered</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      // set selects to current values + bind change
+      document.querySelectorAll('select[data-id]').forEach(s=>{
+        const id = s.dataset.id; const order = orders.find(x=>x.id===id);
+        if(order) s.value = order.status || '';
+        s.onchange = async (e)=>{
+          const newStatus = e.target.value;
+          try{
+            await updateDoc(doc(db, COLLECTION_NAME, id), { status: newStatus });
+            alert('Status updated');
+          }catch(err){ alert('Update failed: '+err.message); }
+        };
+      });
+    }
+
+    // Subscribe to Firestore
+    async function subscribe(){
+      if(unsubscribe) unsubscribe();
+      const colRef = collection(db, COLLECTION_NAME);
+      const q = query(colRef, orderBy('createdAt','desc'));
+      unsubscribe = onSnapshot(q, snap=>{
+        orders = snap.docs.map(d=>({ id: d.id, ...d.data() }));
+        render();
+      }, err=>{
+        console.error(err); orders = []; render();
+      });
+    }
+
+    // Authentication
+    signInBtn.onclick = async ()=>{
+      authMsg.textContent='';
+      try{
+        await signInWithEmailAndPassword(auth, emailEl.value.trim(), passEl.value);
+      }catch(err){ authMsg.textContent = 'Sign in failed: '+err.message; }
+    };
+
+    createUserBtn.onclick = async ()=>{
+      authMsg.textContent='';
+      try{
+        await createUserWithEmailAndPassword(auth, emailEl.value.trim(), passEl.value);
+        authMsg.textContent = 'User created — signed in.';
+      }catch(err){ authMsg.textContent = 'Create failed: '+err.message; }
+    };
+
+    signOutBtn.onclick = async ()=>{ await signOut(auth); };
+
+    // wire UI controls
+    refreshBtn.onclick = ()=> subscribe();
+    exportBtn.onclick = ()=>{
+      const rows = orders.map(o=>({ id:o.id, status:o.status, total:o.total, customerName:o.customerName, customerPhone:o.customerPhone, address:o.address, createdAt: o.createdAt?.seconds? new Date(o.createdAt.seconds*1000).toISOString() : '' }));
+      const csv = toCSV(rows); download(`orders_${new Date().toISOString().slice(0,10)}.csv`, csv);
+    };
+    searchEl.oninput = ()=> render();
+    statusFilterEl.onchange = ()=> render();
+
+    // Auth state observer
+    onAuthStateChanged(auth, user=>{
+      if(user){
+        userArea.textContent = user.email;
+        signedInEmail.textContent = user.email;
+        showMain();
+        subscribe();
+      }else{
+        userArea.textContent = 'Not signed in';
+        signedInEmail.textContent = '';
+        showAuth();
+        if(unsubscribe) { unsubscribe(); unsubscribe = null; }
+      }
+    });
+
+    // Small helper to update doc (imported above)
+    async function updateDocRef(id, patch){
+      return updateDoc(doc(db, COLLECTION_NAME, id), patch);
+    }
+    // make updateDoc available as the function name used in the UI binding
+    window.updateDoc = updateDocRef;
+
+    // Expose doc/db for internal use
+    window.db = db; window.doc = doc;
+
+  </script>
+</body>
+</html>
